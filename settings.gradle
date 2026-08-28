@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = 'ChatSimulator'
-include ':app'
+rootProject.name = 'PersonaChatV2'
+include ':app-v2'
