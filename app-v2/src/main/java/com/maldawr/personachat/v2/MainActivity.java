@@ -1,12 +1,11 @@
 package com.maldawr.personachat.v2;
 
 import android.app.Activity;
-import android.graphics.Color;
+import android.content.Intent;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.TextView;
 
 import com.maldawr.personachat.v2.data.AppDatabase;
 import com.maldawr.personachat.v2.data.DemoSeeder;
@@ -23,91 +22,91 @@ public class MainActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        buildShell();
-        new Thread(this::loadDemoGroup).start();
-    }
-
-    private void buildShell() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(11, 20, 26));
-
-        TextView banner = label("PERSONACHAT V2 • FICTIONAL SIMULATION", 12, 0xFF8DA0A8, true);
-        banner.setGravity(Gravity.CENTER);
-        banner.setPadding(12, 18, 12, 12);
-        root.addView(banner);
+        root.setBackgroundColor(Ui.BG);
+        root.addView(Ui.topBar(this, "PersonaChat", "Chats • fictional AI simulation"));
 
         ScrollView scroll = new ScrollView(this);
         body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(24, 20, 24, 40);
+        body.setPadding(Ui.dp(this, 12), Ui.dp(this, 8), Ui.dp(this, 12), Ui.dp(this, 18));
         scroll.addView(body);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+        root.addView(Ui.bottomNav(this, "Chats"));
         setContentView(root);
+        load();
     }
 
-    private void loadDemoGroup() {
-        DemoSeeder.ensureSeeded(this);
-        AppDatabase.AppDao dao = AppDatabase.get(this).dao();
-        List<GroupEntity> groups = dao.groups();
-        if (groups.isEmpty()) return;
-        GroupEntity group = groups.get(0);
-        List<PersonaEntity> personas = dao.personasForGroup(group.id);
-        List<MessageEntity> messages = dao.messagesForGroup(group.id);
-        Map<Long, PersonaEntity> byId = new HashMap<>();
-        for (PersonaEntity p : personas) byId.put(p.id, p);
-        runOnUiThread(() -> render(group, personas, messages, byId));
+    @Override protected void onResume() {
+        super.onResume();
+        if (body != null) load();
     }
 
-    private void render(GroupEntity group, List<PersonaEntity> personas, List<MessageEntity> messages, Map<Long, PersonaEntity> byId) {
+    private void load() {
+        new Thread(() -> {
+            DemoSeeder.ensureSeeded(this);
+            AppDatabase.AppDao dao = AppDatabase.get(this).dao();
+            List<GroupEntity> groups = dao.groups();
+            Map<Long, List<PersonaEntity>> members = new HashMap<>();
+            Map<Long, List<MessageEntity>> messages = new HashMap<>();
+            for (GroupEntity g : groups) {
+                members.put(g.id, dao.personasForGroup(g.id));
+                messages.put(g.id, dao.messagesForGroup(g.id));
+            }
+            runOnUiThread(() -> render(groups, members, messages));
+        }).start();
+    }
+
+    private void render(List<GroupEntity> groups,
+                        Map<Long, List<PersonaEntity>> members,
+                        Map<Long, List<MessageEntity>> messages) {
         body.removeAllViews();
 
-        TextView title = label(group.name, 27, Color.WHITE, true);
-        body.addView(title);
+        LinearLayout quick = new LinearLayout(this);
+        quick.setGravity(Gravity.CENTER_VERTICAL);
+        android.widget.Button newPersona = Ui.button(this, "New persona");
+        newPersona.setOnClickListener(v -> startActivity(new Intent(this, PersonasActivity.class)));
+        quick.addView(newPersona, new LinearLayout.LayoutParams(0, Ui.dp(this, 46), 1f));
+        android.widget.Button newGroup = Ui.button(this, "Groups");
+        newGroup.setOnClickListener(v -> startActivity(new Intent(this, GroupsActivity.class)));
+        LinearLayout.LayoutParams ng = new LinearLayout.LayoutParams(0, Ui.dp(this, 46), 1f);
+        ng.setMargins(Ui.dp(this, 8), 0, 0, 0);
+        quick.addView(newGroup, ng);
+        LinearLayout.LayoutParams qlp = new LinearLayout.LayoutParams(-1, -2);
+        qlp.setMargins(0, 0, 0, Ui.dp(this, 12));
+        body.addView(quick, qlp);
 
-        StringBuilder names = new StringBuilder("You");
-        for (PersonaEntity p : personas) names.append(", ").append(p.displayName);
-        TextView members = label(names.toString(), 15, 0xFF9AA9B0, false);
-        members.setPadding(0, 4, 0, 8);
-        body.addView(members);
-
-        TextView autonomy = label("Autonomous group conversation: ON • " + group.autonomyLevel + "%", 12, 0xFF53CFA0, true);
-        autonomy.setPadding(0, 0, 0, 20);
-        body.addView(autonomy);
-
-        for (MessageEntity m : messages) {
-            boolean mine = m.senderPersonaId == 0;
-            PersonaEntity p = mine ? null : byId.get(m.senderPersonaId);
-            LinearLayout bubble = new LinearLayout(this);
-            bubble.setOrientation(LinearLayout.VERTICAL);
-            bubble.setPadding(16, 10, 16, 10);
-            bubble.setBackgroundColor(mine ? 0xFF075E54 : 0xFF202C33);
-
-            if (!mine && p != null) {
-                TextView sender = label(p.displayName, 14, p.accentColor, true);
-                bubble.addView(sender);
-            }
-            TextView text = label(m.text, 17, Color.WHITE, false);
-            text.setPadding(0, mine ? 0 : 4, 0, 0);
-            bubble.addView(text);
-
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-            lp.gravity = mine ? Gravity.END : Gravity.START;
-            lp.setMargins(mine ? 90 : 0, 0, mine ? 0 : 90, 12);
-            body.addView(bubble, lp);
+        if (groups.isEmpty()) {
+            body.addView(Ui.text(this, "No conversations yet.", 17, Ui.SUB, false));
+            return;
         }
 
-        TextView footer = label("Next: real avatars, editable personas, DeepSeek multi-agent turns, media and voice.", 13, 0xFF7F9199, false);
-        footer.setPadding(0, 16, 0, 0);
-        body.addView(footer);
-    }
+        for (GroupEntity g : groups) {
+            List<PersonaEntity> ps = members.get(g.id);
+            List<MessageEntity> ms = messages.get(g.id);
+            MessageEntity last = ms == null || ms.isEmpty() ? null : ms.get(ms.size() - 1);
 
-    private TextView label(String text, float size, int color, boolean bold) {
-        TextView view = new TextView(this);
-        view.setText(text);
-        view.setTextSize(size);
-        view.setTextColor(color);
-        if (bold) view.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        return view;
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.VERTICAL);
+            row.setPadding(Ui.dp(this, 16), Ui.dp(this, 13), Ui.dp(this, 16), Ui.dp(this, 13));
+            row.setBackground(Ui.round(Ui.CARD, 16, this));
+            row.addView(Ui.text(this, g.name, 18, Ui.TEXT, true));
+
+            StringBuilder subtitle = new StringBuilder("You");
+            if (ps != null) for (PersonaEntity p : ps) subtitle.append(", ").append(p.displayName);
+            row.addView(Ui.text(this, subtitle.toString(), 12, Ui.SUB, false));
+            row.addView(Ui.text(this, last == null ? "Start a conversation" : last.text, 14, 0xFFB7C3C9, false));
+            row.addView(Ui.text(this, g.allowAutonomousConversation ? "AI group • autonomous" : "AI group", 11, Ui.ACCENT, false));
+
+            row.setOnClickListener(v -> startActivity(new Intent(this, ChatActivity.class).putExtra("group_id", g.id)));
+            row.setOnLongClickListener(v -> {
+                startActivity(new Intent(this, GroupProfileActivity.class).putExtra("group_id", g.id));
+                return true;
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.setMargins(0, 0, 0, Ui.dp(this, 9));
+            body.addView(row, lp);
+        }
     }
 }
