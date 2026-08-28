@@ -11,7 +11,6 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ImageDecoder;
 import android.graphics.Paint;
-import android.graphics.Typeface;
 import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Build;
@@ -51,11 +50,9 @@ public final class CustomizationHelper {
             Bitmap source = decode(context, uri);
             if (source == null) return false;
             Bitmap square = centerCrop(source, 512);
-            Bitmap marked = addSimulationBadge(square);
-            write(context, HOME_ICON, marked);
+            write(context, HOME_ICON, square);
             if (source != square && !source.isRecycled()) source.recycle();
             if (!square.isRecycled()) square.recycle();
-            if (!marked.isRecycled()) marked.recycle();
             return true;
         } catch (Exception ignored) {
             return false;
@@ -103,7 +100,7 @@ public final class CustomizationHelper {
         String shortLabel = fullLabel.length() > 18 ? fullLabel.substring(0, 18) : fullLabel;
         ShortcutInfo shortcut = new ShortcutInfo.Builder(context, SHORTCUT_ID)
                 .setShortLabel(shortLabel)
-                .setLongLabel(fullLabel + " • Simulation")
+                .setLongLabel(fullLabel)
                 .setIcon(Icon.createWithAdaptiveBitmap(custom))
                 .setIntent(open)
                 .build();
@@ -175,43 +172,7 @@ public final class CustomizationHelper {
         } else {
             result.setPixels(pixels, 0, size, 0, 0, size, size);
         }
-        Canvas canvas = new Canvas(result);
-        float r = size * 0.18f;
-        float cx = size - r - size * 0.05f;
-        float cy = size - r - size * 0.05f;
-        Paint badge = new Paint(Paint.ANTI_ALIAS_FLAG);
-        badge.setColor(Color.WHITE);
-        canvas.drawCircle(cx, cy, r, badge);
-        Paint cut = new Paint(Paint.ANTI_ALIAS_FLAG);
-        cut.setColor(Color.TRANSPARENT);
-        cut.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-        cut.setTextAlign(Paint.Align.CENTER);
-        cut.setTextSize(r * 1.25f);
-        cut.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR));
-        Paint.FontMetrics fm = cut.getFontMetrics();
-        canvas.drawText("S", cx, cy - (fm.ascent + fm.descent) / 2f, cut);
-        cut.setXfermode(null);
         if (scaled != source && !scaled.isRecycled()) scaled.recycle();
-        return result;
-    }
-
-    private static Bitmap addSimulationBadge(Bitmap source) {
-        Bitmap result = source.copy(Bitmap.Config.ARGB_8888, true);
-        Canvas canvas = new Canvas(result);
-        float size = result.getWidth();
-        float radius = size * 0.145f;
-        float cx = size - radius - size * 0.055f;
-        float cy = size - radius - size * 0.055f;
-        Paint circle = new Paint(Paint.ANTI_ALIAS_FLAG);
-        circle.setColor(Color.rgb(11, 20, 26));
-        canvas.drawCircle(cx, cy, radius, circle);
-        Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
-        text.setColor(Color.WHITE);
-        text.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-        text.setTextAlign(Paint.Align.CENTER);
-        text.setTextSize(radius * 0.72f);
-        Paint.FontMetrics fm = text.getFontMetrics();
-        canvas.drawText("SIM", cx, cy - (fm.ascent + fm.descent) / 2f, text);
         return result;
     }
 
