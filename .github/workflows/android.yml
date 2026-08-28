@@ -2,7 +2,9 @@ name: Android APK
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - 'feature/**'
     paths-ignore:
       - 'README.md'
   workflow_dispatch:
@@ -22,6 +24,27 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Restore stable PersonaChat debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: personachat-debug-signing-v1
+
+      - name: Create signing key once if cache is empty
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=PersonaChat Debug,O=PersonaChat,C=DE"
+          fi
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -45,5 +68,3 @@ jobs:
           name: personachat-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-
-# DeepSeek Pro chat integration build trigger
