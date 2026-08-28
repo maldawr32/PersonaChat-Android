@@ -1,0 +1,66 @@
+name: Bootstrap PersonaChat source
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/bootstrap.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PersonaChat repository
+        uses: actions/checkout@v4
+        with:
+          path: destination
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch stable Android source
+        run: |
+          git clone --depth 1 --branch personachat-v1 https://github.com/maldawr32/chat-simulator.git source
+          rsync -a --exclude='.git' --exclude='.github' source/ destination/
+
+      - name: Apply PersonaChat identity
+        working-directory: destination
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/build.gradle')
+          s = p.read_text()
+          s = s.replace("applicationId 'com.maldawr.chatsimulator'", "applicationId 'com.maldawr.personachat'")
+          p.write_text(s)
+
+          p = Path('app/src/main/res/values/strings.xml')
+          if p.exists():
+              p.write_text(p.read_text().replace('Chat Simulator', 'PersonaChat'))
+
+          p = Path('app/src/main/AndroidManifest.xml')
+          if p.exists():
+              p.write_text(p.read_text().replace('Chat Simulator', 'PersonaChat'))
+
+          for fn in [
+              'app/src/main/java/com/maldawr/chatsimulator/DisplayPrefs.java',
+              'app/src/main/java/com/maldawr/chatsimulator/ChatActivity.java'
+          ]:
+              q = Path(fn)
+              if q.exists():
+                  q.write_text(q.read_text().replace('Chat Simulator', 'PersonaChat'))
+          PY
+
+      - name: Commit imported source
+        working-directory: destination
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+          else
+            git commit -m 'Bootstrap PersonaChat Android source'
+            git push origin main
+          fi
