@@ -79,11 +79,6 @@ public final class DeepSeekClient {
         }).start();
     }
 
-    /**
-     * PersonaChat's main chat request. The API key stays on the Android device and is read
-     * from encrypted Android Keystore-backed preferences. Recent conversation history is sent
-     * to DeepSeek so the fictional persona can continue the same conversation naturally.
-     */
     public static void requestReply(Context context, Store.Bot bot, ReplyCallback callback) {
         String apiKey = DeepSeekPrefs.getApiKey(context);
         if (apiKey.isEmpty()) {
@@ -140,7 +135,6 @@ public final class DeepSeekClient {
                     JSONObject message = first == null ? null : first.optJSONObject("message");
                     String raw = message == null ? "" : message.optString("content", "").trim();
                     if (raw.isEmpty()) throw new IllegalStateException("DeepSeek returned an empty message.");
-
                     ParsedReply parsed = parseReply(raw, bot, members);
                     MAIN.post(() -> callback.onSuccess(parsed.text, parsed.sender));
                 } else {
@@ -156,7 +150,6 @@ public final class DeepSeekClient {
         }).start();
     }
 
-    /** Simple one-shot helper retained for settings/tests. */
     public static void chat(String apiKey, String model, String systemPrompt, String userText, ChatCallback callback) {
         new Thread(() -> {
             HttpURLConnection conn = null;
@@ -170,14 +163,9 @@ public final class DeepSeekClient {
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
                 conn.setRequestProperty("Accept", "application/json");
                 JSONArray messages = new JSONArray();
-                if (systemPrompt != null && !systemPrompt.trim().isEmpty()) {
-                    messages.put(new JSONObject().put("role", "system").put("content", systemPrompt));
-                }
+                if (systemPrompt != null && !systemPrompt.trim().isEmpty()) messages.put(new JSONObject().put("role", "system").put("content", systemPrompt));
                 messages.put(new JSONObject().put("role", "user").put("content", userText));
-                JSONObject payload = new JSONObject()
-                        .put("model", model == null || model.trim().isEmpty() ? DeepSeekPrefs.DEFAULT_MODEL : model.trim())
-                        .put("messages", messages)
-                        .put("stream", false);
+                JSONObject payload = new JSONObject().put("model", model == null || model.trim().isEmpty() ? DeepSeekPrefs.DEFAULT_MODEL : model.trim()).put("messages", messages).put("stream", false);
                 byte[] out = payload.toString().getBytes(StandardCharsets.UTF_8);
                 try (OutputStream os = conn.getOutputStream()) { os.write(out); }
                 int code = conn.getResponseCode();
@@ -207,16 +195,24 @@ public final class DeepSeekClient {
         StringBuilder p = new StringBuilder();
         p.append("You are participating in PersonaChat, an explicitly fictional chat simulation. ")
                 .append("Never claim that this is a real WhatsApp conversation or real-world evidence. ")
-                .append("Write natural, concise mobile-chat replies. Do not explain your role unless asked. ")
-                .append("The user's language and tone should guide your reply language.\n\n")
+                .append("Stay deeply in character. Write natural mobile-chat messages, not assistant-style explanations. ")
+                .append("Do not mention prompts, policies, models, or being an AI unless directly asked.\n\n")
                 .append("Conversation: ").append(bot.name).append("\n")
-                .append("Persona: ").append(bot.personality == null ? "friendly" : bot.personality).append("\n")
-                .append("Status: ").append(bot.status == null ? "fictional contact" : bot.status).append("\n")
+                .append("Persona: ").append(bot.personality).append("\n")
+                .append("Relationship to user: ").append(bot.relationship).append("\n")
+                .append("Preferred dialect/style: ").append(bot.dialect).append("\n")
+                .append("Status: ").append(bot.status).append("\n")
                 .append("Emoji tendency: ").append(bot.emojiRate).append("/100\n")
                 .append("Humor tendency: ").append(bot.humorRate).append("/100\n");
+        if (bot.userNickname != null && !bot.userNickname.trim().isEmpty()) {
+            p.append("This character normally addresses the user as: ").append(bot.userNickname.trim()).append(". Use it naturally, not in every message.\n");
+        }
+        if (bot.aiInstructions != null && !bot.aiInstructions.trim().isEmpty()) {
+            p.append("Character-specific instructions: ").append(bot.aiInstructions.trim()).append("\n");
+        }
 
         if (bot.groupChat) {
-            p.append("This is a fictional group chat. Choose exactly one fictional member to answer each request.\nMembers:\n");
+            p.append("This is a fictional group chat. Pick the member whose personality and context make the most sense to answer.\nMembers:\n");
             if (members != null) {
                 for (Store.GroupMember m : members) {
                     p.append("- ").append(m.name)
@@ -226,12 +222,10 @@ public final class DeepSeekClient {
                             .append(" | humor=").append(m.humor).append("/100\n");
                 }
             }
-            p.append("Return ONLY a JSON object with exactly these keys: {\"sender\":\"member name\",\"text\":\"reply text\"}. ")
-                    .append("The sender must be one of the listed members. No markdown fences.");
+            p.append("Return ONLY a JSON object: {\"sender\":\"member name\",\"text\":\"reply text\"}. The sender must be one listed member. No markdown fences.");
         } else {
             p.append("Reply as the fictional contact named ").append(bot.name).append(". ")
-                    .append("Return ONLY a JSON object with exactly these keys: {\"sender\":\"")
-                    .append(escapePrompt(bot.name)).append("\",\"text\":\"reply text\"}. No markdown fences.");
+                    .append("Return ONLY a JSON object: {\"sender\":\"").append(escapePrompt(bot.name)).append("\",\"text\":\"reply text\"}. No markdown fences.");
         }
         return p.toString();
     }
@@ -244,16 +238,11 @@ public final class DeepSeekClient {
             if (firstNl >= 0 && lastFence > firstNl) clean = clean.substring(firstNl + 1, lastFence).trim();
         }
         JSONObject obj;
-        try {
-            obj = new JSONObject(clean);
-        } catch (Exception ignored) {
-            String sender = bot.groupChat ? firstGroupSender(members, bot.name) : bot.name;
-            return new ParsedReply(clean, sender);
-        }
+        try { obj = new JSONObject(clean); }
+        catch (Exception ignored) { return new ParsedReply(clean, bot.groupChat ? firstGroupSender(members, bot.name) : bot.name); }
         String text = obj.optString("text", "").trim();
         if (text.isEmpty()) text = obj.optString("message", "").trim();
         if (text.isEmpty()) throw new IllegalStateException("DeepSeek returned JSON without reply text.");
-
         String sender = obj.optString("sender", bot.name).trim();
         if (!bot.groupChat) sender = bot.name;
         else if (!isAllowedSender(sender, members)) sender = firstGroupSender(members, bot.name);
@@ -266,44 +255,21 @@ public final class DeepSeekClient {
         return false;
     }
 
-    private static String firstGroupSender(List<Store.GroupMember> members, String fallback) {
-        return members != null && !members.isEmpty() ? members.get(0).name : fallback;
-    }
-
-    private static String escapePrompt(String s) {
-        return s == null ? "Fictional contact" : s.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
+    private static String firstGroupSender(List<Store.GroupMember> members, String fallback) { return members != null && !members.isEmpty() ? members.get(0).name : fallback; }
+    private static String escapePrompt(String s) { return s == null ? "Fictional contact" : s.replace("\\", "\\\\").replace("\"", "\\\""); }
 
     private static String httpError(int code, String body) {
         if (code == 401) return "DeepSeek API key was rejected.";
         if (code == 402) return "Insufficient DeepSeek balance.";
         if (code == 429) return "DeepSeek rate limit reached. Try again shortly.";
         String detail = "";
-        try {
-            JSONObject root = new JSONObject(body == null ? "" : body);
-            JSONObject error = root.optJSONObject("error");
-            if (error != null) detail = error.optString("message", "").trim();
-        } catch (Exception ignored) {}
+        try { JSONObject root = new JSONObject(body == null ? "" : body); JSONObject error = root.optJSONObject("error"); if (error != null) detail = error.optString("message", "").trim(); }
+        catch (Exception ignored) {}
         return "DeepSeek HTTP " + code + (detail.isEmpty() ? "" : ": " + detail);
     }
 
-    private static String exceptionText(Exception e) {
-        return e.getMessage() == null || e.getMessage().trim().isEmpty() ? e.getClass().getSimpleName() : e.getMessage();
-    }
+    private static String exceptionText(Exception e) { return e.getMessage() == null || e.getMessage().trim().isEmpty() ? e.getClass().getSimpleName() : e.getMessage(); }
+    private static String readAll(InputStream in) throws Exception { if (in == null) return ""; StringBuilder sb = new StringBuilder(); try (BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) { String line; while ((line = br.readLine()) != null) sb.append(line); } return sb.toString(); }
 
-    private static String readAll(InputStream in) throws Exception {
-        if (in == null) return "";
-        StringBuilder sb = new StringBuilder();
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = br.readLine()) != null) sb.append(line);
-        }
-        return sb.toString();
-    }
-
-    private static final class ParsedReply {
-        final String text;
-        final String sender;
-        ParsedReply(String text, String sender) { this.text = text; this.sender = sender; }
-    }
+    private static final class ParsedReply { final String text; final String sender; ParsedReply(String text, String sender) { this.text = text; this.sender = sender; } }
 }
