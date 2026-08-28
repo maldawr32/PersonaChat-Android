@@ -1,0 +1,38 @@
+name: Wire DeepSeek chat
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/wire-deepseek-chat.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch ChatActivity
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/com/maldawr/chatsimulator/ChatActivity.java')
+          s = p.read_text()
+          old = '''        Store.ReplyPlan plan = Store.buildReplyPlan(this, bot, text);\n        if (!plan.isEmpty()) {\n            status.setText(bot.groupChat ? "typing… • SIM" : "typing… • SIM");\n            ReplyScheduler.schedulePlan(this, botId, plan);\n            long first = plan.items.get(0).delayMs;\n            handler.postDelayed(() -> {\n                Store.Bot latest = Store.getBot(this, botId);\n                if (latest != null) status.setText(latest.groupChat && !latest.groupSubtitle.isEmpty() ? latest.groupSubtitle : replyModeLabel(latest));\n            }, Math.min(90000L, first + 1200L));\n        }\n        if (!plan.onlineTopic.isEmpty()) {\n            long delay = plan.items.isEmpty() ? 2500L : plan.items.get(plan.items.size() - 1).delayMs + 2500L;\n            OnlineContentWorker.enqueue(this, botId, plan.onlineTopic, delay);\n        }\n        handler.postDelayed(() -> { sending = false; sendWrap.setEnabled(true); }, 130L);'''
+          new = '''        if (DeepSeekPrefs.hasApiKey(this)) {\n            status.setText("DeepSeek Pro typing… • SIM");\n            DeepSeekClient.requestReply(this, bot, new DeepSeekClient.ReplyCallback() {\n                @Override public void onSuccess(String replyText, String sender) {\n                    if (isFinishing()) return;\n                    Store.Bot latest = Store.getBot(ChatActivity.this, botId);\n                    if (latest == null) return;\n                    Store.addMessage(ChatActivity.this, new Store.Message(\n                            Store.nextMessageId(), botId, replyText, true, System.currentTimeMillis(),\n                            sender == null || sender.trim().isEmpty() ? latest.name : sender.trim(),\n                            "", outgoing.id, "text"));\n                    sounds.playIncoming();\n                    renderMessages();\n                    Store.markRead(ChatActivity.this, botId);\n                    status.setText(latest.groupChat && !latest.groupSubtitle.isEmpty() ? latest.groupSubtitle : replyModeLabel(latest));\n                    sending = false;\n                    sendWrap.setEnabled(true);\n                }\n\n                @Override public void onError(String message) {\n                    if (isFinishing()) return;\n                    Store.Bot latest = Store.getBot(ChatActivity.this, botId);\n                    status.setText(latest != null && latest.groupChat && !latest.groupSubtitle.isEmpty() ? latest.groupSubtitle : (latest == null ? "SIM" : replyModeLabel(latest)));\n                    Toast.makeText(ChatActivity.this, "DeepSeek: " + message, Toast.LENGTH_LONG).show();\n                    sending = false;\n                    sendWrap.setEnabled(true);\n                }\n            });\n        } else {\n            Store.ReplyPlan plan = Store.buildReplyPlan(this, bot, text);\n            if (!plan.isEmpty()) {\n                status.setText("typing… • SIM");\n                ReplyScheduler.schedulePlan(this, botId, plan);\n                long first = plan.items.get(0).delayMs;\n                handler.postDelayed(() -> {\n                    Store.Bot latest = Store.getBot(this, botId);\n                    if (latest != null) status.setText(latest.groupChat && !latest.groupSubtitle.isEmpty() ? latest.groupSubtitle : replyModeLabel(latest));\n                }, Math.min(90000L, first + 1200L));\n            }\n            if (!plan.onlineTopic.isEmpty()) {\n                long delay = plan.items.isEmpty() ? 2500L : plan.items.get(plan.items.size() - 1).delayMs + 2500L;\n                OnlineContentWorker.enqueue(this, botId, plan.onlineTopic, delay);\n            }\n            handler.postDelayed(() -> { sending = false; sendWrap.setEnabled(true); }, 130L);\n        }'''
+          if old not in s:
+              raise SystemExit('Expected ChatActivity block not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/maldawr/chatsimulator/ChatActivity.java
+          git commit -m 'Connect PersonaChat messages to DeepSeek Pro'
+          git push origin main
