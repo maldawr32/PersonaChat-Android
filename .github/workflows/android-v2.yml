@@ -1,0 +1,64 @@
+name: PersonaChat V2 APK
+
+on:
+  push:
+    branches:
+      - 'rewrite/**'
+  workflow_dispatch:
+
+jobs:
+  build-v2:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Restore stable PersonaChat V2 debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: personachat-v2-debug-signing-v1
+
+      - name: Create signing key once if cache is empty
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=PersonaChat V2 Debug,O=PersonaChat,C=DE"
+          fi
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Build PersonaChat V2 debug APK
+        run: gradle --no-daemon :app-v2:assembleDebug
+
+      - name: Upload PersonaChat V2 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: personachat-v2-debug
+          path: app-v2/build/outputs/apk/debug/app-v2-debug.apk
+          if-no-files-found: error
