@@ -13,6 +13,13 @@
         android:label="PersonaChat V2"
         android:theme="@style/AppTheme">
 
+        <activity android:name=".SettingsActivity" android:exported="false" />
+        <activity android:name=".CallsActivity" android:exported="false" />
+        <activity android:name=".GroupProfileActivity" android:exported="false" />
+        <activity android:name=".PersonaProfileActivity" android:exported="false" />
+        <activity android:name=".GroupsActivity" android:exported="false" />
+        <activity android:name=".PersonasActivity" android:exported="false" />
+        <activity android:name=".ChatActivity" android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true">
