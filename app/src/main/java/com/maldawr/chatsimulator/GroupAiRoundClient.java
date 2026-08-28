@@ -17,14 +17,10 @@ import java.util.List;
 import java.util.Random;
 import java.util.Set;
 
-/**
- * Generates a short autonomous multi-member group conversation with DeepSeek.
- * PersonaChat, not the model, controls allowed speakers, round size and delivery timing.
- */
+/** Generates a short autonomous multi-member group conversation with DeepSeek. */
 public final class GroupAiRoundClient {
     private static final String ENDPOINT = "https://api.deepseek.com/chat/completions";
     private static final Random RANDOM = new Random();
-
     private GroupAiRoundClient() {}
 
     public static Store.ReplyPlan requestBlocking(Context context, Store.Bot bot, boolean testMode) throws Exception {
@@ -34,26 +30,19 @@ public final class GroupAiRoundClient {
 
         List<Store.GroupMember> members = Store.loadGroupMembers(context, bot.id);
         if (members.size() < 2) throw new IllegalStateException("Group needs at least two members");
-        List<Store.Message> history = Store.recentMessages(context, bot.id, 28);
-        int activity = Store.getGroupActivity(context);
+        List<Store.Message> history = Store.recentMessages(context, bot.id, 32);
+        int activity = GroupPrefs.getActivity(context, bot.id);
         int desiredCount = desiredMessageCount(activity, members.size(), testMode);
 
         JSONArray messages = new JSONArray();
-        messages.put(new JSONObject().put("role", "system").put("content",
-                buildSystemPrompt(bot, members, activity, desiredCount, testMode)));
-
+        messages.put(new JSONObject().put("role", "system").put("content", buildSystemPrompt(bot, members, activity, desiredCount, testMode)));
         for (Store.Message m : history) {
             if (m == null || m.text == null || m.text.trim().isEmpty() || "reaction_event".equals(m.kind)) continue;
-            String who = m.incoming
-                    ? (m.sender == null || m.sender.trim().isEmpty() ? "Group member" : m.sender.trim())
-                    : "Taj";
-            messages.put(new JSONObject()
-                    .put("role", "user")
-                    .put("content", who + ": " + m.text.trim()));
+            String who = m.incoming ? (m.sender == null || m.sender.trim().isEmpty() ? "Group member" : m.sender.trim()) : "Taj";
+            messages.put(new JSONObject().put("role", "user").put("content", who + ": " + m.text.trim()));
         }
-
         String instruction = testMode
-                ? "Start a natural test conversation now. Pick up a plausible topic from the recent chat."
+                ? "Start a natural test conversation now. Pick up a plausible topic from the recent chat and let members respond to one another."
                 : "Continue the group naturally without pretending Taj just sent a new message. Use recent context and let members respond to each other when it makes sense.";
         messages.put(new JSONObject().put("role", "user").put("content", instruction));
 
@@ -75,11 +64,9 @@ public final class GroupAiRoundClient {
             conn.setRequestProperty("Accept", "application/json");
             byte[] out = payload.toString().getBytes(StandardCharsets.UTF_8);
             try (OutputStream os = conn.getOutputStream()) { os.write(out); }
-
             int code = conn.getResponseCode();
             String body = readAll(code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream());
             if (code < 200 || code >= 300) throw new IllegalStateException("DeepSeek HTTP " + code + errorDetail(body));
-
             JSONObject root = new JSONObject(body);
             JSONArray choices = root.optJSONArray("choices");
             JSONObject first = choices == null ? null : choices.optJSONObject(0);
@@ -87,45 +74,37 @@ public final class GroupAiRoundClient {
             String raw = msg == null ? "" : msg.optString("content", "").trim();
             if (raw.isEmpty()) throw new IllegalStateException("DeepSeek returned an empty group round");
             return parseRound(raw, members, activity, desiredCount);
-        } finally {
-            if (conn != null) conn.disconnect();
-        }
+        } finally { if (conn != null) conn.disconnect(); }
     }
 
-    private static String buildSystemPrompt(Store.Bot bot, List<Store.GroupMember> members,
-                                            int activity, int desiredCount, boolean testMode) {
+    private static String buildSystemPrompt(Store.Bot bot, List<Store.GroupMember> members, int activity, int desiredCount, boolean testMode) {
         StringBuilder p = new StringBuilder();
-        p.append("You write a fictional PersonaChat group simulation. This must never be presented as a real WhatsApp conversation or real-world evidence.\n")
+        p.append("You write a fictional PersonaChat group simulation. Never present it as a real WhatsApp conversation or real-world evidence.\n")
                 .append("Group: ").append(bot.name).append("\n")
+                .append("Group personality/context: ").append(bot.personality).append("\n")
                 .append("Group activity: ").append(activity).append("/100\n")
-                .append("Generate exactly ").append(desiredCount).append(" short mobile-chat messages as a coherent mini-conversation.\n")
-                .append("Members must react to the content of previous messages, may agree/disagree/joke/ask follow-ups, and should not all sound alike.\n")
-                .append("Do not make every member speak. Avoid assistant-like phrases. Avoid repeating the same idea. No narration.\n")
-                .append("The group members are:\n");
+                .append("Generate exactly ").append(desiredCount).append(" short mobile-chat messages as one coherent mini-conversation.\n")
+                .append("Members must react to previous content, can agree, disagree, tease, ask follow-ups, correct each other, or add useful information.\n")
+                .append("Keep facts consistent with the recent conversation. Do not invent major personal facts unless implied by context.\n")
+                .append("Do not make every member speak. Avoid assistant-like phrases, summaries, narration, and repeated ideas.\nMembers:\n");
         for (Store.GroupMember m : members) {
-            p.append("- ").append(m.name)
-                    .append(" | style=").append(m.style)
+            p.append("- ").append(m.name).append(" | style=").append(m.style)
                     .append(" | signatureEmoji=").append(m.emoji)
                     .append(" | activity=").append(m.activity).append("/100")
                     .append(" | humor=").append(m.humor).append("/100\n");
         }
-        p.append("Output ONLY JSON in this shape: {\"messages\":[{\"sender\":\"exact member name\",\"text\":\"message\"}]}. ")
-                .append("Use only listed sender names. Do not put Taj as a sender. Do not use markdown. ")
-                .append("Prefer changing speaker between consecutive messages unless a natural double-message is needed.");
-        if (testMode) p.append(" This is an explicit user-triggered simulation test, so always produce the requested round.");
+        p.append("Output ONLY JSON: {\"messages\":[{\"sender\":\"exact member name\",\"text\":\"message\"}]}. ")
+                .append("Use only listed sender names. Taj is the user and must not be generated as a sender. Prefer speaker changes unless a natural double-message is useful.");
+        if (testMode) p.append(" This is a user-triggered simulation test, so always produce the requested round.");
         return p.toString();
     }
 
-    private static Store.ReplyPlan parseRound(String raw, List<Store.GroupMember> members,
-                                              int activity, int desiredCount) throws Exception {
-        String clean = stripFence(raw);
-        JSONObject obj = new JSONObject(clean);
+    private static Store.ReplyPlan parseRound(String raw, List<Store.GroupMember> members, int activity, int desiredCount) throws Exception {
+        JSONObject obj = new JSONObject(stripFence(raw));
         JSONArray array = obj.optJSONArray("messages");
         if (array == null || array.length() == 0) throw new IllegalStateException("DeepSeek returned no group messages");
-
         Set<String> allowed = new HashSet<>();
         for (Store.GroupMember m : members) allowed.add(m.name);
-
         Store.ReplyPlan plan = new Store.ReplyPlan();
         long delay = firstDelay(activity);
         String previousSender = "";
@@ -156,48 +135,10 @@ public final class GroupAiRoundClient {
         if (activity >= 35) return 2 + RANDOM.nextInt(2);
         return 2;
     }
-
-    private static long firstDelay(int activity) {
-        long min = activity >= 80 ? 900L : activity >= 50 ? 1_500L : 2_500L;
-        long max = activity >= 80 ? 3_500L : activity >= 50 ? 6_000L : 9_000L;
-        return between(min, max);
-    }
-
-    private static long gapDelay(int activity) {
-        if (activity >= 85) return between(2_000L, 7_000L);
-        if (activity >= 60) return between(3_500L, 11_000L);
-        if (activity >= 35) return between(6_000L, 18_000L);
-        return between(10_000L, 30_000L);
-    }
-
-    private static long between(long min, long max) {
-        return min + (long) (RANDOM.nextDouble() * Math.max(1L, max - min + 1L));
-    }
-
-    private static String stripFence(String value) {
-        String s = value == null ? "" : value.trim();
-        if (!s.startsWith("```")) return s;
-        int nl = s.indexOf('\n');
-        int end = s.lastIndexOf("```");
-        return nl >= 0 && end > nl ? s.substring(nl + 1, end).trim() : s;
-    }
-
-    private static String errorDetail(String body) {
-        try {
-            JSONObject root = new JSONObject(body == null ? "" : body);
-            JSONObject error = root.optJSONObject("error");
-            String text = error == null ? "" : error.optString("message", "").trim();
-            return text.isEmpty() ? "" : ": " + text;
-        } catch (Exception ignored) { return ""; }
-    }
-
-    private static String readAll(InputStream in) throws Exception {
-        if (in == null) return "";
-        StringBuilder sb = new StringBuilder();
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = br.readLine()) != null) sb.append(line);
-        }
-        return sb.toString();
-    }
+    private static long firstDelay(int activity) { return activity >= 80 ? between(900,3500) : activity >= 50 ? between(1500,6000) : between(2500,9000); }
+    private static long gapDelay(int activity) { return activity >= 85 ? between(2000,7000) : activity >= 60 ? between(3500,11000) : activity >= 35 ? between(6000,18000) : between(10000,30000); }
+    private static long between(long min,long max){return min+(long)(RANDOM.nextDouble()*Math.max(1L,max-min+1L));}
+    private static String stripFence(String value){String s=value==null?"":value.trim();if(!s.startsWith("```"))return s;int nl=s.indexOf('\n'),end=s.lastIndexOf("```");return nl>=0&&end>nl?s.substring(nl+1,end).trim():s;}
+    private static String errorDetail(String body){try{JSONObject root=new JSONObject(body==null?"":body);JSONObject e=root.optJSONObject("error");String t=e==null?"":e.optString("message","").trim();return t.isEmpty()?"":": "+t;}catch(Exception ignored){return"";}}
+    private static String readAll(InputStream in)throws Exception{if(in==null)return"";StringBuilder sb=new StringBuilder();try(BufferedReader br=new BufferedReader(new InputStreamReader(in,StandardCharsets.UTF_8))){String line;while((line=br.readLine())!=null)sb.append(line);}return sb.toString();}
 }
