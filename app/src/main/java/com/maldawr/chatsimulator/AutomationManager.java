@@ -2,6 +2,7 @@ package com.maldawr.chatsimulator;
 
 import android.content.Context;
 
+import androidx.work.Data;
 import androidx.work.ExistingPeriodicWorkPolicy;
 import androidx.work.ExistingWorkPolicy;
 import androidx.work.OneTimeWorkRequest;
@@ -28,7 +29,11 @@ public final class AutomationManager {
     }
 
     public static void runNow(Context context) {
-        OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(ConversationPulseWorker.class).addTag("conversation-automation-v7-test").build();
+        Data data = new Data.Builder().putBoolean("force_group_test", true).build();
+        OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(ConversationPulseWorker.class)
+                .setInputData(data)
+                .addTag("conversation-automation-v7-test")
+                .build();
         WorkManager.getInstance(context.getApplicationContext()).enqueueUniqueWork(TEST, ExistingWorkPolicy.REPLACE, request);
     }
 
