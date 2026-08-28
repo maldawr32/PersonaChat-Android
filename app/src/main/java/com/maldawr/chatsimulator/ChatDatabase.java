@@ -25,7 +25,7 @@ import java.util.List;
                 ChatDatabase.CallRow.class,
                 ChatDatabase.GroupMemberRow.class
         },
-        version = 3,
+        version = 4,
         exportSchema = false
 )
 public abstract class ChatDatabase extends RoomDatabase {
@@ -34,8 +34,7 @@ public abstract class ChatDatabase extends RoomDatabase {
     public abstract DaoApi dao();
 
     private static final Migration MIGRATION_1_2 = new Migration(1, 2) {
-        @Override
-        public void migrate(SupportSQLiteDatabase database) {
+        @Override public void migrate(SupportSQLiteDatabase database) {
             database.execSQL("ALTER TABLE bots ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0");
             database.execSQL("ALTER TABLE bots ADD COLUMN groupChat INTEGER NOT NULL DEFAULT 0");
             database.execSQL("ALTER TABLE bots ADD COLUMN groupSubtitle TEXT NOT NULL DEFAULT ''");
@@ -44,8 +43,7 @@ public abstract class ChatDatabase extends RoomDatabase {
     };
 
     private static final Migration MIGRATION_2_3 = new Migration(2, 3) {
-        @Override
-        public void migrate(SupportSQLiteDatabase database) {
+        @Override public void migrate(SupportSQLiteDatabase database) {
             database.execSQL("ALTER TABLE bots ADD COLUMN personality TEXT NOT NULL DEFAULT 'friendly'");
             database.execSQL("ALTER TABLE bots ADD COLUMN emojiRate INTEGER NOT NULL DEFAULT 45");
             database.execSQL("ALTER TABLE bots ADD COLUMN humorRate INTEGER NOT NULL DEFAULT 25");
@@ -60,18 +58,17 @@ public abstract class ChatDatabase extends RoomDatabase {
             database.execSQL("ALTER TABLE messages ADD COLUMN replyToId INTEGER NOT NULL DEFAULT 0");
             database.execSQL("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'");
 
-            database.execSQL(
-                    "CREATE TABLE IF NOT EXISTS group_members (" +
-                            "id INTEGER NOT NULL PRIMARY KEY, " +
-                            "botId INTEGER NOT NULL, " +
-                            "name TEXT NOT NULL, " +
-                            "style TEXT NOT NULL, " +
-                            "emoji TEXT NOT NULL, " +
-                            "activity INTEGER NOT NULL, " +
-                            "humor INTEGER NOT NULL, " +
-                            "color INTEGER NOT NULL)"
-            );
+            database.execSQL("CREATE TABLE IF NOT EXISTS group_members (id INTEGER NOT NULL PRIMARY KEY, botId INTEGER NOT NULL, name TEXT NOT NULL, style TEXT NOT NULL, emoji TEXT NOT NULL, activity INTEGER NOT NULL, humor INTEGER NOT NULL, color INTEGER NOT NULL)");
             database.execSQL("CREATE INDEX IF NOT EXISTS index_group_members_botId ON group_members(botId)");
+        }
+    };
+
+    private static final Migration MIGRATION_3_4 = new Migration(3, 4) {
+        @Override public void migrate(SupportSQLiteDatabase database) {
+            database.execSQL("ALTER TABLE bots ADD COLUMN userNickname TEXT NOT NULL DEFAULT ''");
+            database.execSQL("ALTER TABLE bots ADD COLUMN relationship TEXT NOT NULL DEFAULT 'friend'");
+            database.execSQL("ALTER TABLE bots ADD COLUMN dialect TEXT NOT NULL DEFAULT 'match user'");
+            database.execSQL("ALTER TABLE bots ADD COLUMN aiInstructions TEXT NOT NULL DEFAULT ''");
         }
     };
 
@@ -79,13 +76,9 @@ public abstract class ChatDatabase extends RoomDatabase {
         if (INSTANCE == null) {
             synchronized (ChatDatabase.class) {
                 if (INSTANCE == null) {
-                    INSTANCE = Room.databaseBuilder(
-                                    context.getApplicationContext(),
-                                    ChatDatabase.class,
-                                    "chat_simulator_v5.db"
-                            )
+                    INSTANCE = Room.databaseBuilder(context.getApplicationContext(), ChatDatabase.class, "chat_simulator_v5.db")
                             .allowMainThreadQueries()
-                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                             .fallbackToDestructiveMigration()
                             .build();
                 }
@@ -122,6 +115,10 @@ public abstract class ChatDatabase extends RoomDatabase {
         @ColumnInfo(defaultValue = "0") public int quietStart = 0;
         @ColumnInfo(defaultValue = "0") public int quietEnd = 0;
         @ColumnInfo(defaultValue = "''") public String lastTopic = "";
+        @ColumnInfo(defaultValue = "''") public String userNickname = "";
+        @ColumnInfo(defaultValue = "'friend'") public String relationship = "friend";
+        @ColumnInfo(defaultValue = "'match user'") public String dialect = "match user";
+        @ColumnInfo(defaultValue = "''") public String aiInstructions = "";
     }
 
     @Entity(tableName = "messages")
