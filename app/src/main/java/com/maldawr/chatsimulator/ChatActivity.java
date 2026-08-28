@@ -282,21 +282,51 @@ public class ChatActivity extends Activity {
         sounds.playOutgoing();
         input.requestFocus();
 
-        Store.ReplyPlan plan = Store.buildReplyPlan(this, bot, text);
-        if (!plan.isEmpty()) {
-            status.setText(bot.groupChat ? "typing… • SIM" : "typing… • SIM");
-            ReplyScheduler.schedulePlan(this, botId, plan);
-            long first = plan.items.get(0).delayMs;
-            handler.postDelayed(() -> {
-                Store.Bot latest = Store.getBot(this, botId);
-                if (latest != null) status.setText(latest.groupChat && !latest.groupSubtitle.isEmpty() ? latest.groupSubtitle : replyModeLabel(latest));
-            }, Math.min(90000L, first + 1200L));
+        if (DeepSeekPrefs.hasApiKey(this)) {
+            status.setText("DeepSeek Pro typing… • SIM");
+            DeepSeekClient.requestReply(this, bot, new DeepSeekClient.ReplyCallback() {
+                @Override public void onSuccess(String replyText, String sender) {
+                    if (isFinishing()) return;
+                    Store.Bot latest = Store.getBot(ChatActivity.this, botId);
+                    if (latest == null) return;
+                    Store.addMessage(ChatActivity.this, new Store.Message(
+                            Store.nextMessageId(), botId, replyText, true, System.currentTimeMillis(),
+                            sender == null || sender.trim().isEmpty() ? latest.name : sender.trim(),
+                            "", outgoing.id, "text"));
+                    sounds.playIncoming();
+                    renderMessages();
+                    Store.markRead(ChatActivity.this, botId);
+                    status.setText(latest.groupChat && !latest.groupSubtitle.isEmpty() ? latest.groupSubtitle : replyModeLabel(latest));
+                    sending = false;
+                    sendWrap.setEnabled(true);
+                }
+
+                @Override public void onError(String message) {
+                    if (isFinishing()) return;
+                    Store.Bot latest = Store.getBot(ChatActivity.this, botId);
+                    status.setText(latest != null && latest.groupChat && !latest.groupSubtitle.isEmpty() ? latest.groupSubtitle : (latest == null ? "SIM" : replyModeLabel(latest)));
+                    Toast.makeText(ChatActivity.this, "DeepSeek: " + message, Toast.LENGTH_LONG).show();
+                    sending = false;
+                    sendWrap.setEnabled(true);
+                }
+            });
+        } else {
+            Store.ReplyPlan plan = Store.buildReplyPlan(this, bot, text);
+            if (!plan.isEmpty()) {
+                status.setText("typing… • SIM");
+                ReplyScheduler.schedulePlan(this, botId, plan);
+                long first = plan.items.get(0).delayMs;
+                handler.postDelayed(() -> {
+                    Store.Bot latest = Store.getBot(this, botId);
+                    if (latest != null) status.setText(latest.groupChat && !latest.groupSubtitle.isEmpty() ? latest.groupSubtitle : replyModeLabel(latest));
+                }, Math.min(90000L, first + 1200L));
+            }
+            if (!plan.onlineTopic.isEmpty()) {
+                long delay = plan.items.isEmpty() ? 2500L : plan.items.get(plan.items.size() - 1).delayMs + 2500L;
+                OnlineContentWorker.enqueue(this, botId, plan.onlineTopic, delay);
+            }
+            handler.postDelayed(() -> { sending = false; sendWrap.setEnabled(true); }, 130L);
         }
-        if (!plan.onlineTopic.isEmpty()) {
-            long delay = plan.items.isEmpty() ? 2500L : plan.items.get(plan.items.size() - 1).delayMs + 2500L;
-            OnlineContentWorker.enqueue(this, botId, plan.onlineTopic, delay);
-        }
-        handler.postDelayed(() -> { sending = false; sendWrap.setEnabled(true); }, 130L);
     }
 
     private void addQuickAttachment(String label, String kind) {
