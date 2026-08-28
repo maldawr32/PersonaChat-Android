@@ -29,17 +29,24 @@ public final class AutomationManager {
     }
 
     public static void runNow(Context context) {
-        Data data = new Data.Builder().putBoolean("force_group_test", true).build();
+        runGroupNow(context, -1L);
+    }
+
+    public static void runGroupNow(Context context, long botId) {
+        Data data = new Data.Builder()
+                .putBoolean("force_group_test", true)
+                .putLong("force_group_id", botId)
+                .build();
         OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(ConversationPulseWorker.class)
                 .setInputData(data)
                 .addTag("conversation-automation-v7-test")
                 .build();
-        WorkManager.getInstance(context.getApplicationContext()).enqueueUniqueWork(TEST, ExistingWorkPolicy.REPLACE, request);
+        WorkManager.getInstance(context.getApplicationContext()).enqueueUniqueWork(TEST + "-" + botId, ExistingWorkPolicy.REPLACE, request);
     }
 
     public static void cancel(Context context) {
         WorkManager wm = WorkManager.getInstance(context.getApplicationContext());
         wm.cancelUniqueWork(PERIODIC);
-        wm.cancelUniqueWork(TEST);
+        wm.cancelAllWorkByTag("conversation-automation-v7-test");
     }
 }
