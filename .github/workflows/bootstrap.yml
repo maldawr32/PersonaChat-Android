@@ -62,5 +62,6 @@ jobs:
             echo 'No source changes to commit.'
           else
             git commit -m 'Bootstrap PersonaChat Android source'
+            git pull --rebase origin main
             git push origin main
           fi
