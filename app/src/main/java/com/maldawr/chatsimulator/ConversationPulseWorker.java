@@ -19,17 +19,18 @@ public class ConversationPulseWorker extends Worker {
         Context context = getApplicationContext();
         Store.ensureSeeded(context);
         boolean forceGroupTest = getInputData().getBoolean("force_group_test", false);
+        long forceGroupId = getInputData().getLong("force_group_id", -1L);
 
-        if (forceGroupTest) {
-            return runForcedGroupTest(context);
-        }
-
+        if (forceGroupTest) return runForcedGroupTest(context, forceGroupId);
         if (!Store.isAutomationEnabled(context) || Store.isGlobalQuietTime(context)) return Result.success();
+
         List<Store.Bot> candidates = new ArrayList<>();
         long now = System.currentTimeMillis();
         for (Store.Bot bot : Store.loadBots(context)) {
             if (!bot.initiative || !bot.autoReply || !Store.isBotActive(bot)) continue;
-            long gap = bot.groupChat ? randomGroupGap(Store.getGroupActivity(context)) : 24 * 60_000L;
+            if (bot.groupChat && !GroupPrefs.isAutonomous(context, bot.id)) continue;
+            int groupActivity = bot.groupChat ? GroupPrefs.getActivity(context, bot.id) : 0;
+            long gap = bot.groupChat ? randomGroupGap(groupActivity) : 24 * 60_000L;
             if (now - bot.lastTime >= gap) candidates.add(bot);
         }
         Collections.shuffle(candidates, RANDOM);
@@ -37,16 +38,14 @@ public class ConversationPulseWorker extends Worker {
         count = Math.min(count, candidates.size());
         for (int i = 0; i < count; i++) {
             Store.Bot bot = candidates.get(i);
-            int chance = bot.groupChat ? Store.getGroupActivity(context) : 48;
+            int chance = bot.groupChat ? GroupPrefs.getActivity(context, bot.id) : 48;
             if (RANDOM.nextInt(100) >= chance) continue;
             if (bot.groupChat && DeepSeekPrefs.hasApiKey(context)) {
                 try {
                     Store.ReplyPlan aiRound = GroupAiRoundClient.requestBlocking(context, bot, false);
                     ReplyScheduler.schedulePlan(context, bot.id, aiRound);
                     continue;
-                } catch (Exception ignored) {
-                    // Fall back to the proven local conversation engine when the network/API is unavailable.
-                }
+                } catch (Exception ignored) {}
             }
             Store.ReplyPlan plan = ConversationEngine.planProactive(context, bot);
             if (!plan.isEmpty()) ReplyScheduler.schedulePlan(context, bot.id, plan);
@@ -58,22 +57,21 @@ public class ConversationPulseWorker extends Worker {
         return Result.success();
     }
 
-    private Result runForcedGroupTest(Context context) {
-        List<Store.Bot> groups = new ArrayList<>();
-        for (Store.Bot bot : Store.loadBots(context)) {
-            if (bot.groupChat && bot.autoReply) groups.add(bot);
+    private Result runForcedGroupTest(Context context, long requestedId) {
+        Store.Bot bot = requestedId > 0 ? Store.getBot(context, requestedId) : null;
+        if (bot == null || !bot.groupChat) {
+            List<Store.Bot> groups = new ArrayList<>();
+            for (Store.Bot candidate : Store.loadBots(context)) if (candidate.groupChat && candidate.autoReply) groups.add(candidate);
+            if (groups.isEmpty()) return Result.success();
+            bot = groups.get(RANDOM.nextInt(groups.size()));
         }
-        if (groups.isEmpty()) return Result.success();
-        Store.Bot bot = groups.get(RANDOM.nextInt(groups.size()));
 
         if (DeepSeekPrefs.hasApiKey(context)) {
             try {
                 Store.ReplyPlan aiRound = GroupAiRoundClient.requestBlocking(context, bot, true);
                 ReplyScheduler.schedulePlan(context, bot.id, aiRound);
                 return Result.success();
-            } catch (Exception ignored) {
-                // Keep the test useful even if DeepSeek is temporarily unavailable.
-            }
+            } catch (Exception ignored) {}
         }
         Store.ReplyPlan local = ConversationEngine.planProactive(context, bot);
         if (!local.isEmpty()) ReplyScheduler.schedulePlan(context, bot.id, local);
